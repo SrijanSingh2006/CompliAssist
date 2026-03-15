@@ -1,0 +1,142 @@
+.sidebar {
+  width: 280px;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(238, 242, 255, 0.98) 100%);
+  border-right: 1px solid rgba(148, 163, 184, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.sidebar-header {
+  padding: 1.5rem;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  color: var(--primary);
+}
+
+.logo h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.logo p {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.logo-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--primary) 0%, #60a5fa 100%);
+  color: var(--text-inverse);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  transition:
+    transform 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.nav-item:hover {
+  transform: translateX(2px);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--primary);
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, var(--primary) 0%, #3b82f6 100%);
+  color: var(--text-inverse);
+  box-shadow: 0 14px 28px -24px rgba(37, 99, 235, 0.85);
+}
+
+.sidebar-footer {
+  padding: 1rem 1.5rem 1.5rem;
+}
+
+.workspace-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.workspace-card strong {
+  color: var(--text-primary);
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: sticky;
+    z-index: 20;
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  }
+
+  .sidebar-nav {
+    padding: 0 1rem 1rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .nav-item {
+    flex: 1 1 220px;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .logo h2 {
+    font-size: 1rem;
+  }
+
+  .sidebar-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+  }
+}
