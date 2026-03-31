@@ -191,12 +191,15 @@ export function AppProvider({ children }) {
     return response.message;
   }
 
-  async function applyScheme(schemeId) {
-    const response = await performAuthedRequest(`/schemes/${schemeId}/apply`, {
-      method: 'POST',
-    });
+  async function checkSchemeEligibility(schemeId) {
+    const response = await performAuthedRequest(`/schemes/${schemeId}/eligibility`);
     startTransition(() => setData(response.data));
-    return response.message;
+    return {
+      message: response.message,
+      eligible: response.eligible,
+      missingDocs: response.missingDocs || [],
+      matchScore: response.matchScore,
+    };
   }
 
   async function compareLoans() {
@@ -207,18 +210,14 @@ export function AppProvider({ children }) {
     return response.message;
   }
 
-  async function applyLoan(loanId) {
-    const response = await performAuthedRequest(`/loans/${loanId}/apply`, {
-      method: 'POST',
-    });
-    startTransition(() => setData(response.data));
-    return response.message;
-  }
-
   async function getLoanEligibility(loanId) {
     const response = await performAuthedRequest(`/loans/${loanId}/eligibility`);
     startTransition(() => setData(response.data));
-    return response.message;
+    return {
+      message: response.message,
+      eligible: response.eligible,
+      missingDocs: response.missingDocs || [],
+    };
   }
 
   async function askAssistant(question) {
@@ -283,9 +282,8 @@ export function AppProvider({ children }) {
         updateGuidanceDocument,
         resolveAlert,
         scanSchemes,
-        applyScheme,
+        checkSchemeEligibility,
         compareLoans,
-        applyLoan,
         getLoanEligibility,
         askAssistant,
         uploadDocument,

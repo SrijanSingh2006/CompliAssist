@@ -165,7 +165,7 @@ export function buildBootstrap(data) {
     schemes: [...data.schemes].sort((left, right) => right.match - left.match),
     loans: [...data.loans].sort((left, right) => left.minRate - right.minRate),
     documents,
-    assistantHistory: data.assistantHistory.slice(-20),
+    assistantHistory: (data.assistantHistory || []).slice(-20),
     dashboard: {
       score,
       healthLabel: healthLabel(score),

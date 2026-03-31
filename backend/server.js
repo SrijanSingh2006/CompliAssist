@@ -124,103 +124,144 @@ async function getAuthenticatedContext(request, url) {
   return { token, data, session, user };
 }
 
+function getDocumentKeywords(documents) {
+  return (documents || []).map((d) => d.name.toLowerCase()).join(' ');
+}
+
+function checkDocumentEligibility(documents, requiredKeywords) {
+  const docText = getDocumentKeywords(documents);
+  const missing = [];
+  for (const kw of requiredKeywords) {
+    if (!docText.includes(kw.keyword)) {
+      missing.push(kw.label);
+    }
+  }
+  return missing;
+}
+
+const SCHEME_REQUIRED_DOCS = [
+  { keyword: 'udyam', label: 'Udyam Registration Certificate' },
+  { keyword: 'pan', label: 'PAN Card' },
+  { keyword: 'gst', label: 'GST Certificate / GSTIN' },
+];
+
+const LOAN_REQUIRED_DOCS = [
+  { keyword: 'pan', label: 'PAN Card' },
+  { keyword: 'gst', label: 'GST Certificate / Return' },
+  { keyword: 'bank', label: 'Bank Statement (last 6 months)' },
+];
+
 function buildAssistantReply(question, data) {
   const prompt = question.toLowerCase().trim();
-  const profile = data.profile;
-  const pendingCompliances = data.compliances.filter((item) => item.status === 'PENDING');
-  const overdueCompliances = data.compliances.filter((item) => item.status === 'OVERDUE');
-  const completedCompliances = data.compliances.filter((item) => item.status === 'COMPLETED');
-  const overdueAlerts = data.alerts.filter((item) => item.type === 'overdue' && item.status === 'OPEN');
-  const openAlerts = data.alerts.filter((item) => item.status === 'OPEN');
-  const resolvedAlerts = data.alerts.filter((item) => item.status === 'RESOLVED');
-  const topSchemes = [...data.schemes].sort((a, b) => b.match - a.match);
-  const topLoan = [...data.loans].sort((a, b) => a.minRate - b.minRate)[0];
-  const appliedSchemes = data.schemes.filter((s) => s.status === 'APPLIED');
+  const profile = data.profile || {};
+  const compliances = data.compliances || [];
+  const alerts = data.alerts || [];
+  const schemes = data.schemes || [];
+  const loans = data.loans || [];
+  const documents = data.documents || [];
+
+  const pendingCompliances = compliances.filter((item) => item.status === 'PENDING');
+  const overdueCompliances = compliances.filter((item) => item.status === 'OVERDUE');
+  const completedCompliances = compliances.filter((item) => item.status === 'COMPLETED');
+  const overdueAlerts = alerts.filter((item) => item.type === 'overdue' && item.status === 'OPEN');
+  const openAlerts = alerts.filter((item) => item.status === 'OPEN');
+  const resolvedAlerts = alerts.filter((item) => item.status === 'RESOLVED');
+  const topSchemes = [...schemes].sort((a, b) => b.match - a.match);
+  const topLoan = [...loans].sort((a, b) => (a.minRate || 0) - (b.minRate || 0))[0];
+
+  const companyName = profile.companyName || 'your company';
+  const industry = profile.industry || 'your industry';
+  const companySize = profile.companySize || 'MSME';
 
   // Greetings
   if (prompt.match(/^(hi|hello|hey|good morning|good afternoon|good evening|namaste|hii|helo)[\s!?]*/)) {
-    return `Hello! 👋 I'm your CompliAssist AI assistant. I'm here to help ${profile.companyName} stay compliant and grow.\n\nYou currently have:\n• ${pendingCompliances.length} pending compliance task(s)\n• ${overdueCompliances.length} overdue item(s)\n• ${openAlerts.length} open alert(s)\n\nAsk me about GST, loans, schemes, EPF, TDS, documents, deadlines, or anything compliance-related!`;
+    return `Hello! 👋 I'm your CompliAssist AI assistant. I'm here to help **${companyName}** stay compliant and grow.\n\nYou currently have:\n• ${pendingCompliances.length} pending compliance task(s)\n• ${overdueCompliances.length} overdue item(s)\n• ${openAlerts.length} open alert(s)\n\nAsk me about GST, loans, schemes, EPF, TDS, documents, deadlines, or anything compliance-related!`;
   }
 
   // Help / what can you do
   if (prompt.includes('help') || prompt.includes('what can you do') || prompt.includes('capabilities') || prompt.includes('features')) {
-    return `I can help you with a wide range of topics for ${profile.companyName}:\n\n📋 **Compliance** – GST, EPF, TDS, Professional Tax deadlines and status\n🏦 **Loans** – Compare loan offers, check eligibility, apply for financing\n🏛️ **Govt Schemes** – Find matching schemes and check application status\n📁 **Documents** – Track uploaded files and document vault usage\n⚠️ **Alerts** – Check overdue items and upcoming deadlines\n📊 **Dashboard** – Get a summary of your compliance health\n\nJust ask me anything!`;
+    return `I can help you with a wide range of topics for **${companyName}**:\n\n📋 **Compliance** – GST, EPF, TDS, Professional Tax deadlines and status\n🏦 **Loans** – Compare loan offers and check eligibility based on your documents\n🏛️ **Govt Schemes** – Find matching schemes and check eligibility\n📁 **Documents** – Track uploaded files and document vault usage\n⚠️ **Alerts** – Check overdue items and upcoming deadlines\n📊 **Dashboard** – Get a summary of your compliance health\n\nJust ask me anything!`;
   }
 
   // GST filing
   if (prompt.includes('gstr-1') || prompt.includes('gstr1') || (prompt.includes('gst') && prompt.includes('filing'))) {
-    const gstCompliance = data.compliances.find((c) => c.id === 'cmp-gstr1');
+    const gstCompliance = compliances.find((c) => c.id === 'cmp-gstr1');
     const status = gstCompliance?.status || 'PENDING';
     const docsPending = data.guidance?.requiredDocs?.filter((d) => d.status === 'pending') || [];
-    return `📋 **GSTR-1 (Monthly Outward Supplies Return)**\n\nStatus: **${status}** | Due: **${gstCompliance?.date || '2026-03-15'}**\n\n${docsPending.length > 0 ? `⚠️ ${docsPending.length} document(s) still pending in your checklist:\n${docsPending.map((d) => `  • ${d.name}`).join('\n')}\n\n` : '✅ All required documents are ready!\n\n'}**Steps to file:**\n1. Gather sales invoices and export records\n2. Validate customer GSTINs\n3. Prepare the portal upload template\n4. Submit on gst.gov.in and archive the acknowledgement\n\nGo to **Compliance Guidance** in the sidebar for the full step-by-step checklist.`;
+    return `📋 **GSTR-1 (Monthly Outward Supplies Return)**\n\nStatus: **${status}** | Due: **${gstCompliance?.date || 'Check dashboard'}**\n\n${docsPending.length > 0 ? `⚠️ ${docsPending.length} document(s) still pending:\n${docsPending.map((d) => `  • ${d.name}`).join('\n')}\n\n` : '✅ All required documents are ready!\n\n'}**Steps to file:**\n1. Gather sales invoices and export records\n2. Validate customer GSTINs\n3. Prepare the portal upload template\n4. Submit on gst.gov.in and archive the acknowledgement\n\nGo to **Compliance Guidance** in the sidebar for the full step-by-step checklist.`;
   }
 
   // General GST questions
   if (prompt.includes('gst') || prompt.includes('goods and service')) {
-    return `💡 **GST Overview for ${profile.companyName}**\n\nAs an MSME in ${profile.industry}, you are required to:\n• File **GSTR-1** monthly for outward supplies\n• File **GSTR-3B** monthly as a summary return\n• Maintain input tax credit (ITC) records\n\nYour current GST status: ${pendingCompliances.find((c) => c.title.includes('GST')) ? '⚠️ GSTR-1 filing is PENDING' : '✅ No pending GST filings'}\n\nAsk me specifically about "GSTR-1 filing" or "GST status" for more details.`;
+    return `💡 **GST Overview for ${companyName}**\n\nAs an MSME in ${industry}, you are required to:\n• File **GSTR-1** monthly for outward supplies\n• File **GSTR-3B** monthly as a summary return\n• Maintain input tax credit (ITC) records\n\nYour current GST status: ${pendingCompliances.find((c) => c.title && c.title.includes('GST')) ? '⚠️ GSTR-1 filing is PENDING' : '✅ No pending GST filings'}\n\nAsk me specifically about "GSTR-1 filing" or "GST status" for more details.`;
   }
 
   // EPF / Provident Fund
   if (prompt.includes('epf') || prompt.includes('provident fund') || prompt.includes('pf ') || prompt.match(/\bpf\b/)) {
-    const epfCompliance = data.compliances.find((c) => c.id === 'cmp-epf');
-    return `🏦 **EPF (Employees' Provident Fund) Status**\n\nStatus: **${epfCompliance?.status || 'COMPLETED'}** | Due: ${epfCompliance?.date || '2026-03-11'}\n\n${epfCompliance?.status === 'COMPLETED' ? '✅ Your EPF contribution for this month has been completed.' : '⚠️ EPF contribution is pending. Due on ' + epfCompliance?.date}\n\n**Key Points:**\n• ${profile.companyName} has ${profile.employees} employees on EPF rolls\n• Employer contribution: 12% of Basic + DA\n• Employee contribution: 12% of Basic + DA\n• File monthly via the EPFO Unified Portal\n\nLate contributions attract interest @18% per annum.`;
+    const epfCompliance = compliances.find((c) => c.id === 'cmp-epf');
+    return `🏦 **EPF (Employees' Provident Fund) Status**\n\nStatus: **${epfCompliance?.status || 'PENDING'}** | Due: ${epfCompliance?.date || 'Check dashboard'}\n\n${epfCompliance?.status === 'COMPLETED' ? '✅ Your EPF contribution for this month has been completed.' : '⚠️ EPF contribution is pending. Please file before the due date.'}\n\n**Key Points:**\n• ${companyName} has ${profile.employees || 'N/A'} employees on EPF rolls\n• Employer contribution: 12% of Basic + DA\n• Employee contribution: 12% of Basic + DA\n• File monthly via the EPFO Unified Portal\n\nLate contributions attract interest @18% per annum.`;
   }
 
   // TDS
   if (prompt.includes('tds') || prompt.includes('tax deducted') || prompt.includes('tcs')) {
-    const tdsCompliance = data.compliances.find((c) => c.id === 'cmp-tds');
-    return `💰 **TDS (Tax Deducted at Source) Status**\n\nStatus: **${tdsCompliance?.status || 'PENDING'}** | Due: **${tdsCompliance?.date || '2026-03-18'}**\n\n${tdsCompliance?.status === 'PENDING' ? '⚠️ TDS payment is due. File before the deadline to avoid interest.' : '✅ TDS payment is up to date.'}\n\n**For ${profile.industry} companies:**\n• Section 194J – Professional/Technical services: 10%\n• Section 194C – Contractor payments: 1-2%\n• Section 192 – Salary TDS (as per slab)\n\nFile via the **NSDL TIN Portal** and deposit using Challan 281.`;
+    const tdsCompliance = compliances.find((c) => c.id === 'cmp-tds');
+    return `💰 **TDS (Tax Deducted at Source) Status**\n\nStatus: **${tdsCompliance?.status || 'PENDING'}** | Due: **${tdsCompliance?.date || 'Check dashboard'}**\n\n${tdsCompliance?.status === 'PENDING' ? '⚠️ TDS payment is due. File before the deadline to avoid interest.' : '✅ TDS payment is up to date.'}\n\n**For ${industry} companies:**\n• Section 194J – Professional/Technical services: 10%\n• Section 194C – Contractor payments: 1-2%\n• Section 192 – Salary TDS (as per slab)\n\nFile via the **NSDL TIN Portal** and deposit using Challan 281.`;
   }
 
   // Professional Tax
   if (prompt.includes('professional tax') || prompt.includes('ptax') || prompt.includes('p-tax')) {
-    const ptaxCompliance = data.compliances.find((c) => c.id === 'cmp-ptax');
-    const ptaxAlert = data.alerts.find((a) => a.id === 'alert-ptax');
-    return `⚠️ **Professional Tax (Karnataka)**\n\nStatus: **${ptaxCompliance?.status || 'OVERDUE'}** | Was due: ${ptaxCompliance?.date || '2026-03-08'}\n\n${ptaxCompliance?.status === 'OVERDUE' ? '🚨 This payment is OVERDUE. Late fees may apply. Please pay immediately via the Karnataka Commercial Taxes portal.' : '✅ Professional Tax is up to date.'}\n\n**PT Slabs (Karnataka):**\n• Salary ₹25,000+: ₹200/month per employee\n• Employer PT (enrolled persons): ₹2,500/year\n\nGo to **Alerts & Deadlines** to resolve this item and update your compliance score.`;
+    const ptaxCompliance = compliances.find((c) => c.id === 'cmp-ptax');
+    return `⚠️ **Professional Tax**\n\nStatus: **${ptaxCompliance?.status || 'OVERDUE'}** | Was due: ${ptaxCompliance?.date || 'Check dashboard'}\n\n${ptaxCompliance?.status === 'OVERDUE' ? '🚨 This payment is OVERDUE. Late fees may apply. Please pay immediately via the Karnataka Commercial Taxes portal.' : '✅ Professional Tax is up to date.'}\n\n**PT Slabs (Karnataka):**\n• Salary ₹25,000+: ₹200/month per employee\n• Employer PT (enrolled persons): ₹2,500/year\n\nGo to **Alerts & Deadlines** to resolve this item and update your compliance score.`;
   }
 
   // Loans / Finance
   if (prompt.includes('loan') || prompt.includes('finance') || prompt.includes('credit') || prompt.includes('borrow') || prompt.includes('fund')) {
-    return `🏦 **Loan Recommendations for ${profile.companyName}**\n\nBased on your profile (${profile.companySize}, ${profile.industry}), here are the top options:\n\n${data.loans.map((l, i) => `${i + 1}. **${l.bank} – ${l.type}**\n   Rate: ${l.interest} | Amount: ${l.amount} | Tenure: ${l.tenure}\n   Purpose: ${l.purpose}`).join('\n\n')}\n\n💡 **Best rate:** ${topLoan.bank} at ${topLoan.interest}\n\nGo to **Loan Recommendations** in the sidebar to apply or check eligibility for any of these!`;
+    const missingLoanDocs = checkDocumentEligibility(documents, LOAN_REQUIRED_DOCS);
+    const loanEligNote = missingLoanDocs.length === 0 ? '✅ Your documents look good for loan eligibility!' : `📎 To improve loan eligibility, upload: ${missingLoanDocs.join(', ')}`;
+    const loanList = loans.map((l, i) => `${i + 1}. **${l.bank} – ${l.type}**\n   Rate: ${l.interest} | Amount: ${l.amount} | Tenure: ${l.tenure}\n   Purpose: ${l.purpose}`).join('\n\n');
+    return `🏦 **Loan Recommendations for ${companyName}**\n\n${loanList || 'No loan offers available currently.'}\n\n${topLoan ? `💡 **Best rate:** ${topLoan.bank} at ${topLoan.interest}` : ''}\n\n${loanEligNote}\n\nGo to **Loan Recommendations** to view details and check eligibility.`;
   }
 
   // Schemes / Subsidies / Government support
   if (prompt.includes('scheme') || prompt.includes('subsidy') || prompt.includes('government support') || prompt.includes('ministry') || prompt.includes('grant')) {
-    return `🏛️ **Government Schemes for ${profile.companyName}**\n\n${topSchemes.map((s) => `• **${s.title}** (${s.ministry})\n  Match: ${s.match}% | Status: ${s.status}\n  ${s.benefits}`).join('\n\n')}\n\n${appliedSchemes.length > 0 ? `✅ You have already applied for ${appliedSchemes.length} scheme(s).` : '💡 Click "Apply Now" on any scheme to start your application.'}\n\nGo to **Govt Schemes** to scan for new matches based on your current profile.`;
+    const missingSchemeDocs = checkDocumentEligibility(documents, SCHEME_REQUIRED_DOCS);
+    const schemeEligNote = missingSchemeDocs.length === 0 ? '✅ Your documents support scheme eligibility!' : `📎 Upload these documents to improve eligibility: ${missingSchemeDocs.join(', ')}`;
+    const schemeList = topSchemes.map((s) => `• **${s.title}** (${s.ministry})\n  Match: ${s.match}% | ${s.benefits}`).join('\n\n');
+    return `🏛️ **Government Schemes for ${companyName}**\n\n${schemeList || 'No schemes matched currently.'}\n\n${schemeEligNote}\n\nGo to **Govt Schemes** to check eligibility for each scheme based on your uploaded documents.`;
   }
 
   // CLCSS / specific scheme questions
   if (prompt.includes('clcss') || prompt.includes('credit linked capital')) {
-    return `🏭 **CLCSS (Credit Linked Capital Subsidy Scheme)**\n\nThis scheme provides upfront capital subsidy of 15% on institutional credit up to ₹1 Crore for upgrading plant & machinery.\n\n**Eligibility:**\n• Valid Udyam Registration (you have: ${profile.udyamRegistration})\n• Manufacturing or service sector MSME\n• Investment in approved plant & machinery\n\nApply through your bank or SIDBI. Go to **Govt Schemes** page for more matching schemes.`;
+    return `🏭 **CLCSS (Credit Linked Capital Subsidy Scheme)**\n\nThis scheme provides upfront capital subsidy of 15% on institutional credit up to ₹1 Crore for upgrading plant & machinery.\n\n**Eligibility:**\n• Valid Udyam Registration (you have: ${profile.udyamRegistration || 'N/A'})\n• Manufacturing or service sector MSME\n• Investment in approved plant & machinery\n\nCheck eligibility on the **Govt Schemes** page. Apply through your bank or SIDBI.`;
   }
 
   // Documents / vault
   if (prompt.includes('document') || prompt.includes('upload') || prompt.includes('vault') || prompt.includes('file') || prompt.includes('storage')) {
-    return `📁 **Document Vault Status**\n\nTotal files: **${data.documents.length}** file(s)\n\n${data.documents.length === 0 ? 'Your vault is empty. Start uploading compliance documents to keep everything audit-ready.' : data.documents.map((d) => `• ${d.name} (${d.type})`).join('\n')}\n\n**Recommended documents to upload:**\n• GSTR-1 Acknowledgement (after filing)\n• EPF payment challan\n• TDS challan 281\n• Udyam Certificate\n• PAN Card & GST Certificate\n\nGo to **Document Storage** to upload new files.`;
+    return `📁 **Document Vault Status**\n\nTotal files: **${documents.length}** file(s)\n\n${documents.length === 0 ? 'Your vault is empty. Upload compliance documents to enable accurate eligibility checking for loans and schemes.' : documents.map((d) => `• ${d.name} (${d.type})`).join('\n')}\n\n**Documents needed for eligibility checks:**\n• Udyam Certificate (for schemes)\n• PAN Card (for loans & schemes)\n• GST Certificate (for loans & schemes)\n• Bank Statement (for loans)\n\nGo to **Document Storage** to upload files.`;
   }
 
   // Alerts / deadlines / overdue
   if (prompt.includes('alert') || prompt.includes('deadline') || prompt.includes('overdue') || prompt.includes('urgent') || prompt.includes('pending')) {
     if (overdueAlerts.length > 0) {
-      return `🚨 **Urgent Alerts for ${profile.companyName}**\n\n${overdueAlerts.map((a) => `⛔ **${a.title}**\n   ${a.desc}`).join('\n\n')}\n\nOpen alerts: **${openAlerts.length}** | Resolved: **${resolvedAlerts.length}**\n\n⚡ Resolve overdue items immediately to avoid penalties and improve your compliance health score. Go to **Alerts & Deadlines** in the sidebar.`;
+      return `🚨 **Urgent Alerts for ${companyName}**\n\n${overdueAlerts.map((a) => `⛔ **${a.title}**\n   ${a.desc}`).join('\n\n')}\n\nOpen alerts: **${openAlerts.length}** | Resolved: **${resolvedAlerts.length}**\n\n⚡ Resolve overdue items immediately to avoid penalties. Go to **Alerts & Deadlines** in the sidebar.`;
     }
     return `✅ **No overdue alerts right now!**\n\nUpcoming items:\n${openAlerts.map((a) => `• ${a.title} – due ${a.date}`).join('\n') || 'No open alerts.'}\n\nYour compliance score looks healthy. Keep tracking deadlines via the **Alerts & Deadlines** page.`;
   }
 
   // Compliance status / health
   if (prompt.includes('compliance') || prompt.includes('status') || prompt.includes('health') || prompt.includes('score')) {
-    const completionPct = Math.round((completedCompliances.length / Math.max(data.compliances.length, 1)) * 100);
-    return `📊 **Compliance Health: ${profile.companyName}**\n\n• ✅ Completed: ${completedCompliances.length}\n• ⏳ Pending: ${pendingCompliances.length}\n• 🚨 Overdue: ${overdueCompliances.length}\n• Total tracked: ${data.compliances.length}\n\nCompletion rate: **${completionPct}%**\n\n${overdueCompliances.length > 0 ? '⚠️ You have overdue items. Head to **Alerts & Deadlines** to resolve them and boost your score.' : '👍 Keep up the good work! No overdue items.'}`;
+    const completionPct = Math.round((completedCompliances.length / Math.max(compliances.length, 1)) * 100);
+    return `📊 **Compliance Health: ${companyName}**\n\n• ✅ Completed: ${completedCompliances.length}\n• ⏳ Pending: ${pendingCompliances.length}\n• 🚨 Overdue: ${overdueCompliances.length}\n• Total tracked: ${compliances.length}\n\nCompletion rate: **${completionPct}%**\n\n${overdueCompliances.length > 0 ? '⚠️ You have overdue items. Head to **Alerts & Deadlines** to resolve them and boost your score.' : '👍 Keep up the good work! No overdue items.'}`;
   }
 
   // Profile / company info
   if (prompt.includes('profile') || prompt.includes('company') || prompt.includes('about') || prompt.includes('business')) {
-    return `🏢 **Company Profile: ${profile.companyName}**\n\n• Industry: ${profile.industry}\n• Type: ${profile.businessType}\n• Size: ${profile.companySize}\n• Employees: ${profile.employees}\n• Location: ${profile.location}\n• Founded: ${profile.foundedYear}\n• Udyam: ${profile.udyamRegistration}\n• PAN: ${profile.pan}\n\nTo update these details, go to **MSME Profile** in the sidebar. Profile changes automatically refresh loan and scheme recommendations.`;
+    return `🏢 **Company Profile: ${companyName}**\n\n• Industry: ${industry}\n• Type: ${profile.businessType || 'N/A'}\n• Size: ${companySize}\n• Employees: ${profile.employees || 'N/A'}\n• Location: ${profile.location || 'N/A'}\n• Founded: ${profile.foundedYear || 'N/A'}\n• Udyam: ${profile.udyamRegistration || 'N/A'}\n• PAN: ${profile.pan || 'N/A'}\n\nTo update these details, go to **MSME Profile** in the sidebar.`;
   }
 
   // Udyam registration
   if (prompt.includes('udyam') || prompt.includes('registration') || prompt.includes('msme certificate')) {
-    return `📜 **Udyam Registration Status**\n\nRegistration No: **${profile.udyamRegistration}**\nVerification: **${profile.verificationStatus || 'Verified'}**\n\nYour Udyam certificate is the foundation for accessing:\n• Govt scheme benefits (Priority Sector Lending)\n• Credit Guarantee Fund (CGS)\n• ZED Certification subsidies\n• Collateral-free loans up to ₹10 Crore\n\n💡 Keep your Udyam details up to date via the msme.gov.in portal, especially when your turnover or investment changes.`;
+    return `📜 **Udyam Registration Status**\n\nRegistration No: **${profile.udyamRegistration || 'Not set'}**\nVerification: **${profile.verificationStatus || 'Verified'}**\n\nYour Udyam certificate is required for:\n• Govt scheme eligibility checks\n• Credit Guarantee Fund (CGS)\n• ZED Certification subsidies\n• Collateral-free loans up to ₹10 Crore\n\n💡 Upload your Udyam certificate to the **Document Storage** to enable eligibility checks.`;
   }
 
   // Settings / notifications
@@ -230,21 +271,21 @@ function buildAssistantReply(question, data) {
 
   // Income tax / ITR
   if (prompt.includes('income tax') || prompt.includes('itr') || prompt.includes('it return')) {
-    return `🧾 **Income Tax / ITR for MSMEs**\n\n${profile.businessType.includes('Private') ? 'As a Private Limited Company, you file **ITR-6** (Companies).' : 'As a Partnership/Proprietorship, you file **ITR-5** or **ITR-3**.'}\n\n**Key dates:**\n• Advance Tax Q4: 15 March\n• ITR Filing (Audit required): 31 October\n• ITR Filing (No audit): 31 July\n\n**Presumptive Taxation (Section 44AD):** Available if turnover ≤ ₹3 Crore (8% of receipts as profit, or 6% for digital transactions).\n\nConsult your CA for tax planning and ensure all TDS deductions are reconciled with Form 26AS.`;
+    const isTradingOrPvt = (profile.businessType || '').includes('Private');
+    return `🧾 **Income Tax / ITR for MSMEs**\n\n${isTradingOrPvt ? 'As a Private Limited Company, you file **ITR-6** (Companies).' : 'As a Partnership/Proprietorship, you file **ITR-5** or **ITR-3**.'}\n\n**Key dates:**\n• Advance Tax Q4: 15 March\n• ITR Filing (Audit required): 31 October\n• ITR Filing (No audit): 31 July\n\n**Presumptive Taxation (Section 44AD):** Available if turnover ≤ ₹3 Crore (8% of receipts as profit, or 6% for digital transactions).\n\nConsult your CA for tax planning and ensure all TDS deductions are reconciled with Form 26AS.`;
   }
 
   // Dashboard / summary
   if (prompt.includes('dashboard') || prompt.includes('summary') || prompt.includes('overview')) {
-    return `📈 **Workspace Summary: ${profile.companyName}**\n\n**Compliance:** ${completedCompliances.length}/${data.compliances.length} completed\n**Alerts:** ${overdueAlerts.length} overdue, ${openAlerts.length} open total\n**Schemes:** ${data.schemes.length} matched, ${appliedSchemes.length} applied\n**Loans:** ${data.loans.length} offers available\n**Documents:** ${data.documents.length} files in vault\n\n${overdueAlerts.length > 0 ? '🚨 Priority Action: Resolve overdue alerts to improve your compliance health score.' : '✅ No urgent actions needed!'}`;
+    return `📈 **Workspace Summary: ${companyName}**\n\n**Compliance:** ${completedCompliances.length}/${compliances.length} completed\n**Alerts:** ${overdueAlerts.length} overdue, ${openAlerts.length} open total\n**Schemes:** ${schemes.length} matched\n**Loans:** ${loans.length} offers available\n**Documents:** ${documents.length} files in vault\n\n${overdueAlerts.length > 0 ? '🚨 Priority Action: Resolve overdue alerts to improve your compliance health score.' : '✅ No urgent actions needed!'}`;
   }
 
   // Thank you
   if (prompt.match(/^(thanks|thank you|thank|thx|ty)[\s!?]*/)) {
-    return `You're welcome! 😊 Feel free to ask anytime. I'm here to help ${profile.companyName} stay compliant and grow!\n\nIs there anything else I can assist you with?`;
+    return `You're welcome! 😊 Feel free to ask anytime. I'm here to help **${companyName}** stay compliant and grow!\n\nIs there anything else I can assist you with?`;
   }
 
-  // Default fallback – smarter and more helpful
-  return `I can help you with compliance, loans, schemes, documents, and alerts for ${profile.companyName}.\n\n**Try asking:**\n• "What is my GST filing status?"\n• "Show me my compliance health"\n• "What loans are available for me?"\n• "Which government schemes match my profile?"\n• "What documents do I need to upload?"\n• "Are there any overdue alerts?"\n• "Explain EPF requirements"\n• "What is TDS for my company?"\n\nCurrently tracking **${data.compliances.length}** compliance items for your ${profile.industry} business.`;
+  return `I can help you with compliance, loans, schemes, documents, and alerts for **${companyName}**.\n\n**Try asking:**\n• "What is my GST filing status?"\n• "Show me my compliance health"\n• "What loans are available for me?"\n• "Which government schemes match my profile?"\n• "What documents do I need to upload?"\n• "Are there any overdue alerts?"\n• "Explain EPF requirements"\n• "What is TDS for my company?"\n\nCurrently tracking **${compliances.length}** compliance items for your ${industry} business.`;
 }
 
 async function handleLogin(request, response) {
@@ -494,9 +535,9 @@ async function handleApi(request, response, url) {
 
   if (pathname === '/api/schemes/scan' && method === 'POST') {
     const { data } = await updateData((draft) => {
-      const isTech = draft.profile.industry.toLowerCase().includes('technology');
+      const isTech = (draft.profile.industry || '').toLowerCase().includes('technology');
       draft.schemes = draft.schemes.map((scheme, index) => {
-        const bonus = isTech && scheme.tags.includes('TECHNOLOGY') ? 5 : 0;
+        const bonus = isTech && scheme.tags && scheme.tags.includes('TECHNOLOGY') ? 5 : 0;
         return {
           ...scheme,
           match: Math.max(68, Math.min(99, scheme.match + bonus - index)),
@@ -511,31 +552,38 @@ async function handleApi(request, response, url) {
     return;
   }
 
-  const schemeApplyMatch = /^\/api\/schemes\/([^/]+)\/apply$/.exec(pathname);
+  const schemeEligibilityMatch = /^\/api\/schemes\/([^/]+)\/eligibility$/.exec(pathname);
 
-  if (schemeApplyMatch && method === 'POST') {
-    const schemeId = schemeApplyMatch[1];
+  if (schemeEligibilityMatch && method === 'GET') {
+    const schemeId = schemeEligibilityMatch[1];
+    const scheme = auth.data.schemes.find((item) => item.id === schemeId);
 
-    try {
-      const { data, result } = await updateData((draft) => {
-        const scheme = draft.schemes.find((item) => item.id === schemeId);
-
-        if (!scheme) {
-          throw new Error('Scheme not found.');
-        }
-
-        scheme.status = 'APPLIED';
-        scheme.appliedAt = new Date().toISOString();
-        return { title: scheme.title };
-      });
-
-      sendJson(response, 200, {
-        message: `Application started for ${result.title}.`,
-        data: buildBootstrap(data),
-      });
-    } catch {
+    if (!scheme) {
       sendJson(response, 404, { message: 'Scheme not found.' });
+      return;
     }
+
+    const missingDocs = checkDocumentEligibility(auth.data.documents, SCHEME_REQUIRED_DOCS);
+    const profile = auth.data.profile || {};
+    const isEligible = missingDocs.length === 0 && scheme.match >= 70;
+
+    let message;
+    if (isEligible) {
+      message = `✅ Eligible for "${scheme.title}": Your profile (${profile.companySize || 'MSME'}, ${profile.industry || 'your industry'}) matches ${scheme.match}% and all key documents are present. You can apply via the relevant Ministry portal.`;
+    } else {
+      const reasons = [];
+      if (scheme.match < 70) reasons.push(`profile match is only ${scheme.match}% (need 70%+)`);
+      if (missingDocs.length > 0) reasons.push(`missing documents: ${missingDocs.join(', ')}`);
+      message = `⚠️ Not yet eligible for "${scheme.title}": ${reasons.join('; ')}. Upload the required documents to the Document Vault to improve eligibility.`;
+    }
+
+    sendJson(response, 200, {
+      message,
+      eligible: isEligible,
+      missingDocs,
+      matchScore: scheme.match,
+      data: buildBootstrap(auth.data),
+    });
     return;
   }
 
@@ -591,8 +639,21 @@ async function handleApi(request, response, url) {
       return;
     }
 
+    const profile = auth.data.profile || {};
+    const missingDocs = checkDocumentEligibility(auth.data.documents, LOAN_REQUIRED_DOCS);
+    const isEligible = missingDocs.length === 0;
+
+    let message;
+    if (isEligible) {
+      message = `✅ Eligible for ${loan.bank} ${loan.type}: Your ${(profile.companySize || 'MSME').toLowerCase()} profile in ${(profile.industry || 'your industry').toLowerCase()} qualifies for ${loan.purpose.toLowerCase()} financing. All required documents are present. Visit the lender's portal to start your application.`;
+    } else {
+      message = `⚠️ ${loan.bank} ${loan.type} – missing documents: ${missingDocs.join(', ')}. Upload them to the Document Vault for a complete eligibility check.`;
+    }
+
     sendJson(response, 200, {
-      message: `${loan.bank} ${loan.type} fits a ${auth.data.profile.companySize.toLowerCase()} profile in ${auth.data.profile.industry.toLowerCase()} with likely priority for ${loan.purpose.toLowerCase()}.`,
+      message,
+      eligible: isEligible,
+      missingDocs,
       data: buildBootstrap(auth.data),
     });
     return;
@@ -610,6 +671,9 @@ async function handleApi(request, response, url) {
     const { data, result } = await updateData((draft) => {
       const answer = buildAssistantReply(question, draft);
 
+      if (!Array.isArray(draft.assistantHistory)) {
+        draft.assistantHistory = [];
+      }
       draft.assistantHistory.push(
         {
           id: `msg-${randomUUID()}`,
